@@ -5,7 +5,6 @@
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
-#include "mpi.h"
 
 using namespace std;
 
@@ -24,7 +23,7 @@ double hid[hidden_layer_nodes + 1];	//hidden layer node values + bias
 double prev_hid[recursion_number][hidden_layer_nodes];	//previous hidden layer node values
 double tv[output_nodes];	// target value
 double op[output_nodes]; //output values
-double alpha = 0.22;	//learning rate
+double alpha = 0.43;	//learning rate
 						//variables for the error back propagation
 double deltaho[output_nodes];
 double deltah[hidden_layer_nodes];
@@ -32,19 +31,21 @@ double deltahh[hidden_layer_nodes];
 double delWho[hidden_layer_nodes + 1][output_nodes];
 double delin[hidden_layer_nodes];
 double delWih[input_nodes + 1][hidden_layer_nodes];
-long maxEpoch = 100000; //max epochs
-						//double min = 10.0, max = -10.0;
-int wih_len = (input_nodes + 1) * (hidden_layer_nodes);
-int who_len = (hidden_layer_nodes + 1) * (output_nodes);
-int whh_len = (hidden_layer_nodes) * (hidden_layer_nodes);
-int prev_hid_len = hidden_layer_nodes;
+long maxEpoch = 200000; //max epochs
+int error_rec[2][recursion_number];
+
+int cur_count = 1;
+int tst = 1;
+double crr = 0, err = 0;
+int curr_rec = 0;
 
 double mse = 0;
 double initial_weight = 1;
-int curr_rec = 0;
 
-ifstream file("water_6_97-10_reduced_2_cap_rs.csv");
+ifstream file("water_6_11-15_reduced_2_cap_rs.csv");
+ifstream weights("100k_8_hidden_daily_rec_022_parallel_rs.txt");
 ofstream outfile;
+ofstream errfile;
 string value;
 
 void create_network();
@@ -55,92 +56,51 @@ void next_iter();
 void printweights();
 void printinputs();
 void writeweights();
+void set_weights();
+void write_errfile();
+void test_network();
 
-int main(int argc, char *argv[])
+int main()
 {
 	int j = 0;
 	long epoch = 0;
-	create_network();
-	//printweights();
+	curr_rec = 15;
+	set_weights();
+	printweights();
 	clear_values();
-	cout << "\nRNN Training.";
-	
-	int rank, num_procs;
-	MPI_Status status;
-	MPI_Init(&argc, &argv);
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-	MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
-
-	cout << "\nHello from processor " << rank << "!\n";
-
-
-	for (epoch = 0; epoch < maxEpoch; epoch++)
+	for (int i = 0; i < recursion_number; i++)
 	{
-		//min = 10.0;
-		//max = -10.0;
-		//cout << "\nEpoch " << epoch << " running.";
-		for(int k = rank; k < recursion_number; k = k + num_procs)
-		{
-			while (!file.eof())
-			{
-				getline(file, value);
-				next_iter();
-				//printinputs();
-				if (curr_rec == k)
-				{
-					run_network();
-					recal_weights();
-					clear_values();
-				}
-			}
-			file.clear();
-			file.seekg(0, file.beg);
-			//cout << "\nEpoch " << (epoch + 1) << " completed.";
-		}
-		
-		if (((epoch + 1) % 5000 == 0) && (rank == 0))
-		{
-			//alpha = 0.9 * alpha;
-			cout << "\nEpoch " << (epoch + 1) << " completed.";
-		}
-		
-		//printweights();
-		//cout << "\n\nMax: " << max << "\tMin:" << min;
+		error_rec[0][i] = 0;
 	}
-	
+	for (int i = 0; i < recursion_number; i++)
+	{
+		error_rec[1][i] = 0;
+	}
+	errfile.open("error.csv");
+	while (!file.eof())
+	{
+		getline(file, value);
+		next_iter();
+		run_network();
+		test_network();
+		write_errfile();
+		recal_weights();
+		clear_values();
+	}
+	file.clear();
+	file.seekg(0, file.beg);
 	file.close();
-	if (rank != 0)
+	outfile.open("100k_8_hidden_daily_retrained.txt");
+	cout << "\n\nCorrect: " << crr << "\n\nError: " << err;
+	cout << "\n\n\nCorrect and errors for each recursion: ";
+	for (int i = 0; i < recursion_number; i++)
 	{
-		for (int k = rank; k < recursion_number; k = k + num_procs)
-		{
-			MPI_Send(&wih[k][0][0], wih_len, MPI_DOUBLE, 0, (k * 25), MPI_COMM_WORLD);
-			MPI_Send(&who[k][0][0], who_len, MPI_DOUBLE, 0, (k * 50), MPI_COMM_WORLD);
-			MPI_Send(&whh[k][0][0], whh_len, MPI_DOUBLE, 0, (k * 75), MPI_COMM_WORLD);
-			MPI_Send(&prev_hid[k][0], prev_hid_len, MPI_DOUBLE, 0, (k * 100), MPI_COMM_WORLD);
-		}
+		cout << "\n" << error_rec[0][i] << "\t" << error_rec[1][i];
 	}
-
-	if(rank == 0)
-	{
-		for (int k = rank; k < recursion_number; k++)
-		{
-		  if (k % num_procs != 0)
-		    {
-		      MPI_Recv(&wih[k][0][0], wih_len, MPI_DOUBLE, (k % num_procs), (k * 25), MPI_COMM_WORLD, &status);
-		      MPI_Recv(&who[k][0][0], who_len, MPI_DOUBLE, (k % num_procs), (k * 50), MPI_COMM_WORLD, &status);
-		      MPI_Recv(&whh[k][0][0], whh_len, MPI_DOUBLE, (k % num_procs), (k * 75), MPI_COMM_WORLD, &status);
-		      MPI_Recv(&prev_hid[k][0], prev_hid_len, MPI_DOUBLE, (k % num_procs), (k * 100), MPI_COMM_WORLD, &status);
-		    }
-		}
-
-		outfile.open("100k_6_hidden_daily_rec_022_parallel.txt");
-		writeweights();
-		outfile.close();
-		printweights();
-	}
-
-	MPI_Finalize();
-	//getchar();
+	writeweights();
+	errfile.close();
+	outfile.close();
+	getchar();
 	return 0;
 }
 
@@ -181,14 +141,13 @@ void create_network()
 				tmp = rand() % 2000000 - 1000000;
 				whh[k][i][j] = tmp / 1000000;
 			}
-			prev_hid[k][i] = 0;
+			prev_hid[curr_rec][i] = 0;
 		}
 	}
 }
 
 void clear_values()
 {
-	//clear all input and hidden node values (biases as 1)
 	int i = 0, j = 0;
 	for (i = 0; i < input_nodes; i++)
 	{
@@ -221,7 +180,6 @@ void next_iter()
 	char *token;
 
 	token = strtok(&value[0], seps);
-	//std::cout << "\n" << token << "\n";
 	while (token != NULL)
 	{
 		tmp[i] = atof(token);
@@ -232,48 +190,15 @@ void next_iter()
 			inp[i] = tanh(inp[i] / 46);
 			break;
 		case 1:
-			// tanh((x - 130)/135)
-			inp[i] = tmp[i] - 100;// / (1 + exp(-0.18 * (tmp[i] - 15)));	//tmax
-								  //inp[i] = tmp[i] / (1.0 + abs(tmp[i]));
-								  //inp[i] = (2 / (double)(1 + exp(-2 * (inp[i] / 15)))) - 1;
+			inp[i] = tmp[i] - 100;
 			inp[i] = tanh(inp[i] / 100);
-			//inp[4] = 0;
-			//if (tmp[i] > 280)
-			//{
-			//	inp[4] = 1;
-			//}
 			break;
 		case 2:
-			//prec tanh((x - 630)/ 315)
-			//inp[i] = tmp[i] - 630; //
-								   //inp[i] = (2 / (double)(1 + exp(-2 * (inp[i] / 24)))) - 1;
-		        //inp[i] = tanh(inp[i] / 315);
 			inp[i] = tanh((tmp[i] - 126) / 63);
 			break;
-			//inp[i] = tmp[i];
-			//break;
-			/*case 3:
-			//snow tanh((x - 150) / 75)
-			//inp[i] = tmp[i] - 150;
-			//inp[i] = tanh(inp[i] / 75);
-			inp[i] = tmp[i] - 50;
-			inp[i] = tanh(inp[i] / 25);
-			break;
-			/*
-		case 4:
-			//snwd tanh((x - 180) / 90)
-			inp[i] = tmp[i] - 180;
-			inp[i] = tanh(inp[i] / 90);
-			break;
-					
-		case 4:
-			inp[3] = tmp[i];
-			break;		
-		*/
 		case 5:
 			tv[0] = atof(token) - 140;
 			tv[0] = tanh(tv[0] / 20);
-			//cout << "  " << tv[0];
 			break;
 		case 6:
 			curr_rec = tmp[i] - 1;
@@ -291,6 +216,7 @@ void next_iter()
 
 	hid[hidden_layer_nodes] = 1;	//bias	
 }
+
 
 void run_network()
 {
@@ -396,23 +322,10 @@ void recal_weights()
 																		//deltah[j] = delin[j] * exp(hid[j])/((1 + exp(hid[j])) * (1 + exp(hid[j])));	//sigmoid
 																		//deltah[j] = delin[j] / ((1 + abs(hid[j])) * (1 + abs(hid[j])));	//softsign
 	}
-	/*
-	//calculation of delta p_h -> h
-	for (j = 0; j < hidden_layer_nodes; j++)
-	{
-
-	deltahh[j] = delin[j] * (1 - (tanh((hid[j] - 4) / 6) * tanh((prev_hid[j] - 4) / 6)));	//tanh
-	//deltah[j] = delin[j] * exp(hid[j])/((1 + exp(hid[j])) * (1 + exp(hid[j])));	//sigmoid
-	//deltah[j] = delin[j] / ((1 + abs(hid[j])) * (1 + abs(hid[j])));	//softsign
-	}
-	*/
-
-	//delta input, i -> h
 	for (i = 0; i <= input_nodes; i++)
 	{
 		for (j = 0; j < hidden_layer_nodes; j++)
 		{
-			//delWih[i][j] = alpha * deltah[j] * inp[i];
 			wih[curr_rec][i][j] = wih[curr_rec][i][j] + (alpha * deltah[j] * inp[i]);
 		}
 	}
@@ -556,6 +469,85 @@ void writeweights()
 		}
 	}
 }
+
+void set_weights()
+{
+	//cout<< "Hello";
+	int i = 0, j = 0, k = 0, l = 0, h = 0;
+	while (!weights.eof())
+	{
+		getline(weights, value);
+		//float tmp;
+		char seps[] = ",";
+		char *token;
+
+		token = strtok(&value[0], seps);
+		//std::cout << "\n" << token << "\n";
+		while (token != NULL)
+		{
+			if (curr_rec == 15)
+			{
+				curr_rec = atoi(token);
+			}
+			else if (i < (input_nodes + 1))
+			{
+
+				if (j < hidden_layer_nodes)
+				{
+					wih[curr_rec][i][j++] = atof(token);
+					if (j == hidden_layer_nodes)
+					{
+						i++;
+						j = 0;
+					}
+				}
+			}
+			else if (l < (hidden_layer_nodes))
+			{
+				if (j < hidden_layer_nodes)
+				{
+					whh[curr_rec][l][j++] = atof(token);
+					if (j == hidden_layer_nodes)
+					{
+						l++;
+						j = 0;
+					}
+				}
+			}
+			else if (k < (hidden_layer_nodes + 1))
+			{
+				if (j < output_nodes)
+				{
+					who[curr_rec][k][j++] = atof(token);
+					if (j == output_nodes)
+					{
+						k++;
+						j = 0;
+					}
+				}
+			}
+			else if (h < (hidden_layer_nodes))
+			{
+				prev_hid[curr_rec][h] = atof(token);
+				h++;
+				if (h == hidden_layer_nodes)
+				{
+					curr_rec = 15;
+					i = 0; j = 0; k = 0; h = 0; l = 0;
+				}
+			}
+
+			token = strtok(NULL, ",");
+		}
+	}
+	weights.clear();
+}
+
+void write_errfile()
+{
+	errfile << cur_count++ << "," << tv[0] << "," << op[0] << "," << abs(tv[0] - op[0]) << "\n";
+}
+
 void printinputs()
 {
 	int i;
@@ -564,9 +556,38 @@ void printinputs()
 	{
 		cout << "\t" << inp[i];
 	}
+	/*
 	cout << "\nHidden Nodes:\n";
 	for (i = 0; i <= hidden_layer_nodes; i++)
 	{
-		cout << "\t" << hid[i];
+	cout << "\t" << hid[i];
+	}
+	*/
+}
+
+void test_network()
+{
+	//printinputs();
+	int i = 0;
+	tst = 1;
+	if ((op[0] == tv[0]) || (abs(op[0] - tv[0]) <= 0.2))
+	{
+		tst = 1;
+		error_rec[0][curr_rec]++;
+	}
+	else
+	{
+		tst = 0;
+		error_rec[1][curr_rec]++;
+	}
+
+	if (tst == 1)
+	{
+		crr++;
+	}
+	else
+	{
+		err++;
+		//printinputs();
 	}
 }
