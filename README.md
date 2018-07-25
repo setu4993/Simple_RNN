@@ -9,12 +9,12 @@ My paper ['A water demand prediction model for Central Indiana'](https://aaai.or
 
 The code attached creates 12 recurrent neural networks, one for each month, and predicts the daily water demand based on weather inputs, all of which is read from a CSV file. More details about the implementation can be found in the paper. Cite as:
 `
-@paper{AAAI1816511,   
-	author = {Setu Shah and Mahmood Hosseini and Zina Ben Miled and Rebecca Shafer and Steve Berube},   
-	title = {A Water Demand Prediction Model for Central Indiana},   
-	conference = {AAAI Conference on Artificial Intelligence},   
-	year = {2018},   
-	keywords = {Prediction; Modeling; Neural Networks},   
-	url = {https://aaai.org/ocs/index.php/AAAI/AAAI18/paper/view/16511}   
+@paper{AAAI1816511,   \n
+	author = {Setu Shah and Mahmood Hosseini and Zina Ben Miled and Rebecca Shafer and Steve Berube},   \n
+	title = {A Water Demand Prediction Model for Central Indiana},   \n
+	conference = {AAAI Conference on Artificial Intelligence},   \n
+	year = {2018},   \n
+	keywords = {Prediction; Modeling; Neural Networks},   \n
+	url = {https://aaai.org/ocs/index.php/AAAI/AAAI18/paper/view/16511}   \n
 }
 `
